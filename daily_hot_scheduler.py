@@ -60,13 +60,21 @@ def get_next_time(job) -> Optional[datetime]:
     return nft.astimezone(TZ) if nft else None
 
 
+from concurrent.futures import ThreadPoolExecutor, TimeoutError, ProcessPoolExecutor
+
+EXEC_TIMEOUT_SEC = 300  # 收集最多跑 5 分钟
+
 def collect_job():
-    try:
-        logger.info("开始执行【数据收集】")
-        collect_daily_hot_data()
-        logger.info("完成【数据收集】")
-    except Exception as e:
-        logger.exception(f"【数据收集】出错: {e}")
+    logger.info("开始执行【数据收集】")
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        fut = ex.submit(collect_daily_hot_data)
+        try:
+            fut.result(timeout=EXEC_TIMEOUT_SEC)
+            logger.info("完成【数据收集】")
+        except TimeoutError:
+            logger.error(f"【数据收集】超过 {EXEC_TIMEOUT_SEC}s 未完成，已超时中止")
+        except Exception as e:
+            logger.exception(f"【数据收集】出错: {e}")
 
 
 def analyze_job():
@@ -90,6 +98,10 @@ def email_job():
 def start_scheduler():
     scheduler = BlockingScheduler(
         timezone=TZ,
+        executors={
+            "default": ThreadPoolExecutor(5),
+            "processpool": ProcessPoolExecutor(1),
+        },
         job_defaults={
             "coalesce": True,  # 堆积时只跑一次
             "max_instances": 1,  # 防止并发重入

@@ -54,6 +54,7 @@ cp .env.example .env
 ```
 bash
 docker compose up -d --build
+docker logs -f daily-hot-reminder
 ```
 ## 使用说明
 
