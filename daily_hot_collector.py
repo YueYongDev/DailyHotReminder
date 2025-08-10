@@ -149,9 +149,14 @@ def analyze_daily_hot_data():
                     item.ai_summary = analysis_result["summary"]
                     item.ai_tags = analysis_result["tags"]
                     item.last_summarized_at = datetime.now()
-                    # 重置失败计数
+                    # 重置失败计数或清除错误信息
                     if item.extra and isinstance(item.extra, dict):
-                        item.extra['analysis_fail_count'] = 0
+                        # 如果之前有失败记录，现在成功了则清除相关错误信息
+                        item.extra.pop('analysis_fail_count', None)
+                        item.extra.pop('last_error', None)
+                        # 如果extra字段变为空，则设为None
+                        if not item.extra:
+                            item.extra = None
 
                     session.commit()
                     logger.info(f"分析完成: {item.category} - {item.title}")
