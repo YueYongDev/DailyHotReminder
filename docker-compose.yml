@@ -3,7 +3,7 @@ version: '3.8'
 services:
   app:
     build: .
-    container_name: daily_hot_reminder
+    container_name: daily-hot-reminder
     environment:
       RUN_AS_SCHEDULER: true
       # 数据库配置
