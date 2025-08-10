@@ -2,29 +2,59 @@ version: '3.8'
 
 services:
   app:
-    build: .
+    build:
+      context: .
     container_name: daily-hot-reminder
+    # 若是纯定时任务服务，不需要暴露端口；有 HTTP 健康检查时再加 ports
     environment:
       TZ: "Asia/Shanghai"
-      RUN_ON_START: "true"       # 启动即跑一遍（验证后可删）
-      RUN_AS_SCHEDULER: true
-      # 数据库配置
-      SQLALCHEMY_DATABASE_URL: postgresql://root:root@host.docker.internal:5432/alfred
-      SUMMARIZER_API_URL: ${SUMMARIZER_API_URL}
-      # 邮件配置
-      SMTP_SERVER: ${SMTP_SERVER}
-      SMTP_PORT: ${SMTP_PORT}
-      SENDER_EMAIL: ${SENDER_EMAIL}
-      SENDER_PASSWORD: ${SENDER_PASSWORD}
-      # 收件人配置
-      RECIPIENT_yueyong1030@outlook.com: 36kr,tieba,zhihu
+
+      # 模式开关
+      RUN_AS_SCHEDULER: "true"     # 以调度器模式运行
+      RUN_ON_START: "true"         # 启动即跑一遍（验证后可去掉）
+      # TEST_MODE: "true"          # 验证期：每分钟跑一次（代码里支持的话再开）
+
+      # 数据库
+      SQLALCHEMY_DATABASE_URL: "postgresql://root:root@host.docker.internal:5432/alfred"
+
+      # 依赖的外部 API
+      SUMMARIZER_API_URL: "${SUMMARIZER_API_URL}"
+
+      # 邮件配置（放 .env 里更安全）
+      SMTP_SERVER: "${SMTP_SERVER}"
+      SMTP_PORT: "${SMTP_PORT}"
+      SENDER_EMAIL: "${SENDER_EMAIL}"
+      SENDER_PASSWORD: "${SENDER_PASSWORD}"
+
+      # 收件人：不要在环境变量名里用 @ ，改成统一的 CSV 或 YAML
+      # 示例（CSV）：邮箱:频道列表;邮箱:频道列表
+      RECIPIENTS: "yueyong1030@outlook.com:36kr,tieba,zhihu"
+
+
+    # Linux 想访问宿主机（DB/其它服务）必须加这行
     extra_hosts:
-      - "host.docker.internal:host-gateway"   # Linux 需要；mac/win 可保留无害
+      - "host.docker.internal:host-gateway"
+
+
+    # 建议把敏感信息放到 .env 中
     env_file:
       - .env
+
+    # DNS（你之前网络解析慢/失败时用）
     dns:
       - 8.8.8.8
       - 1.1.1.1
+
+    # 日志持久化
     volumes:
       - ./logs:/app/logs
+      - ./recipients.json:/app/recipients.json:ro
+
+    # 健康检查（可选，确定进程还活着）
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import os,sys; sys.exit(0)'"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
     restart: unless-stopped

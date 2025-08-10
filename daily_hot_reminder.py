@@ -1,9 +1,11 @@
+import json
+import os
 import smtplib
 from datetime import datetime
 from email.header import Header
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import List, Dict
+from typing import Dict, List
 
 # 加载.env文件
 from jinja2 import Template
@@ -312,21 +314,40 @@ def send_email(subject: str, html_content: str, recipients: list):
         return False
 
 
-def parse_recipient_subscriptions() -> Dict[str, List[str]]:
+def parse_recipient_subscriptions(config_path: str = "recipients.json") -> Dict[str, List[str]]:
     """
-    解析环境变量中的收件人订阅配置
-    
-    :return: 字典，key为邮箱地址，value为订阅的分类列表
-    """
-    subscriptions = {}
-    for key, value in config.ALL_ENV_VARS:
-        if key.startswith('RECIPIENT_') and '@' in key:
-            email = key.replace('RECIPIENT_', '')
-            categories = [cat.strip() for cat in value.split(',') if cat.strip()]
-            subscriptions[email] = categories
+    从 JSON 文件解析收件人订阅配置
 
-    logger.info(f"解析到 {len(subscriptions)} 个收件人订阅配置")
-    return subscriptions
+    :param config_path: JSON 配置文件路径
+    :return: {邮箱: [分类1, 分类2, ...]}
+    """
+    if not os.path.exists(config_path):
+        logger.error(f"收件人配置文件 {config_path} 不存在")
+        return {}
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if not isinstance(data, dict):
+            raise ValueError("recipients.json 必须是对象类型 {email: [categories]}")
+
+        # 清理数据
+        subscriptions = {}
+        for email, categories in data.items():
+            if not isinstance(categories, list):
+                logger.warning(f"邮箱 {email} 的分类不是列表，已跳过")
+                continue
+            cleaned = [cat.strip() for cat in categories if isinstance(cat, str) and cat.strip()]
+            if cleaned:
+                subscriptions[email] = cleaned
+
+        logger.info(f"解析到 {len(subscriptions)} 个收件人订阅配置")
+        return subscriptions
+
+    except json.JSONDecodeError as e:
+        logger.error(f"解析 {config_path} 出错：{e}")
+        return {}
 
 
 def get_user_hot_items(email: str, user_categories: List[str]) -> list:
@@ -343,20 +364,20 @@ def get_user_hot_items(email: str, user_categories: List[str]) -> list:
         return get_top_hot_items(today_only=True)
 
     logger.info(f"用户 {email} 订阅了 {len(user_categories)} 个分类: {user_categories}")
-    
+
     # 获取每个分类的热门项目，每个分类最多3条
     hot_items = []
     items_per_category = max(3, config.MAX_ITEMS_PER_EMAIL // len(user_categories))
-    
+
     for category in user_categories:
         category_items = get_top_hot_items(categories=[category], today_only=True)
         if category_items:
             # 取每个分类中最多items_per_category条热点
             hot_items.extend(category_items[:items_per_category])
-    
+
     # 按热度排序
     hot_items.sort(key=lambda x: x['hot_score'], reverse=True)
-    
+
     # 应用最大项目数限制
     max_items = config.MAX_ITEMS_PER_EMAIL
     return hot_items[:max_items]
