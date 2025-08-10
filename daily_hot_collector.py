@@ -123,9 +123,22 @@ def analyze_daily_hot_data():
 
         for item in hot_items:
             try:
+                # 检查失败次数，如果失败超过2次则跳过
+                if item.extra and isinstance(item.extra, dict):
+                    fail_count = item.extra.get('analysis_fail_count', 0)
+                    if fail_count >= 2:
+                        logger.info(f"跳过分析（失败次数已达上限）: {item.category} - {item.title}")
+                        continue
+
                 # 检查是否有URL可以用于分析
                 if not item.url:
                     logger.warning(f"跳过分析，没有URL: {item.category} - {item.title}")
+                    # 记录失败次数
+                    if not item.extra:
+                        item.extra = {}
+                    item.extra['analysis_fail_count'] = item.extra.get('analysis_fail_count', 0) + 1
+                    item.last_summarized_at = datetime.now()
+                    session.commit()
                     continue
 
                 # 调用客户端的分析功能
@@ -136,16 +149,31 @@ def analyze_daily_hot_data():
                     item.ai_summary = analysis_result["summary"]
                     item.ai_tags = analysis_result["tags"]
                     item.last_summarized_at = datetime.now()
+                    # 重置失败计数
+                    if item.extra and isinstance(item.extra, dict):
+                        item.extra['analysis_fail_count'] = 0
 
                     session.commit()
                     logger.info(f"分析完成: {item.category} - {item.title}")
                 else:
                     logger.error(f"分析失败: {item.category} - {item.title}")
+                    # 记录失败次数
+                    if not item.extra:
+                        item.extra = {}
+                    item.extra['analysis_fail_count'] = item.extra.get('analysis_fail_count', 0) + 1
+                    item.last_summarized_at = datetime.now()
+                    session.commit()
                     continue
 
             except Exception as e:
                 logger.error(f"分析失败: {item.category} - {item.title}, 错误: {e}")
-                session.rollback()
+                # 记录失败次数
+                if not item.extra:
+                    item.extra = {}
+                item.extra['analysis_fail_count'] = item.extra.get('analysis_fail_count', 0) + 1
+                item.extra['last_error'] = str(e)
+                item.last_summarized_at = datetime.now()
+                session.commit()
                 continue
 
     except Exception as e:

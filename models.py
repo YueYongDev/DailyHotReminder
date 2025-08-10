@@ -1,9 +1,8 @@
 # db/models.py
-from sqlalchemy import Column, Integer, Text, ARRAY, TIMESTAMP
+from sqlalchemy import Column, Integer, String, Text, DateTime, Numeric, JSON, TIMESTAMP, ARRAY
 from sqlalchemy.ext.declarative import declarative_base
 
 Base = declarative_base()
-
 
 class DailyHot(Base):
     __tablename__ = "daily_hot"
@@ -19,5 +18,6 @@ class DailyHot(Base):
     collected_at = Column(TIMESTAMP)  # 收集时间
     ai_tags = Column(ARRAY(Text))  # AI生成的标签
     ai_summary = Column(Text)  # AI生成的摘要
+    extra = Column(JSON)
     last_summarized_at = Column(TIMESTAMP)  # 最后一次AI处理时间
     last_embedded_at = Column(TIMESTAMP)  # 最后一次向量化时间
