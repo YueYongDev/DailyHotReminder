@@ -5,6 +5,8 @@ services:
     build: .
     container_name: daily-hot-reminder
     environment:
+      TZ: "Asia/Shanghai"
+      RUN_ON_START: "true"       # 启动即跑一遍（验证后可删）
       RUN_AS_SCHEDULER: true
       # 数据库配置
       SQLALCHEMY_DATABASE_URL: postgresql://root:root@host.docker.internal:5432/alfred

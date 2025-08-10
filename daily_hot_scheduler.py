@@ -73,14 +73,14 @@ def start_scheduler():
     # === 根据你的注释：8:00 / 8:05 / 9:00 ===
     scheduler.add_job(
         collect_job,
-        CronTrigger(hour=0, minute=10),
+        CronTrigger(hour=8, minute=0),
         id="daily_hot_collector",
         name="每日热点收集",
         replace_existing=True,
     )
     scheduler.add_job(
         analyze_job,
-        CronTrigger(hour=0, minute=15),
+        CronTrigger(hour=8, minute=5),
         id="daily_hot_analyzer",
         name="每日热点分析",
         replace_existing=True,
@@ -118,6 +118,16 @@ def start_scheduler():
 
 
 if __name__ == "__main__":
+    # 启动后立即执行一次（用于验证）
+    if os.getenv("RUN_ON_START", "").lower() == "true":
+        logger.info("RUN_ON_START=true：立即执行一次 收集/分析/发送 用于验证")
+        try:
+            collect_job()
+            analyze_job()
+            email_job()
+        except Exception:
+            logger.exception("RUN_ON_START 执行失败")
+
     if os.getenv("RUN_AS_SCHEDULER", "").lower() == "true":
         logger.info(f"以定时任务模式启动（当前时间 {datetime.now(TZ):%Y-%m-%d %H:%M:%S %Z}）")
         start_scheduler()

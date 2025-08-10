@@ -6,6 +6,12 @@ WORKDIR /app
 # 复制依赖文件
 COPY requirements.txt .
 
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
+  && ln -fs /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+  && dpkg-reconfigure -f noninteractive tzdata \
+  && rm -rf /var/lib/apt/lists/*
+ENV TZ=Asia/Shanghai
+
 # 安装依赖
 RUN pip install --no-cache-dir -r requirements.txt
 
