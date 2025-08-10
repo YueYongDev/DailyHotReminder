@@ -1,13 +1,4 @@
-from datetime import datetime
-from datetime import datetime
 from typing import Dict, Any
-
-from loguru import logger
-from sqlalchemy.orm import Session
-
-from daily_hot_client import DailyHotClient
-from database import SessionLocal
-from models import DailyHot
 
 
 # 修改后的 save_hot_item_to_db 函数
@@ -105,86 +96,124 @@ def collect_daily_hot_data():
             save_hot_item_to_db(category_name, item)
 
 
-def analyze_daily_hot_data():
+from typing import List
+from datetime import datetime
+from loguru import logger
+from sqlalchemy.orm import Session
+
+from daily_hot_client import DailyHotClient
+from database import SessionLocal
+from models import DailyHot
+
+
+def analyze_daily_hot_data(batch_size: int = 100, max_fail: int = 2) -> None:
     """
-    对数据库中的热点数据进行分析，生成摘要和标签
-    通过调用DailyHotClient中的外部API获取分析结果
+    拉取“待分析”的热点数据，调用外部摘要器生成 {summary, tags}，并写回数据库。
+
+    规则：
+    - 仅处理 last_summarized_at 为 NULL 且 url 非空的记录
+    - 分析成功：写入 ai_summary/ai_tags，设置 last_summarized_at=now，清理失败计数
+    - 分析失败：只增加 analysis_fail_count（不写 last_summarized_at），记录 last_error
+    - 当 analysis_fail_count >= max_fail 时跳过
+    - 每条记录独立提交，避免单条失败影响整批
     """
     session: Session = SessionLocal()
     client = DailyHotClient()
 
-    try:
-        # 获取未分析或需要重新分析的热点数据
-        hot_items = session.query(DailyHot).filter(
-            DailyHot.last_summarized_at.is_(None)
-        ).all()
+    success_cnt = 0
+    fail_cnt = 0
+    skip_no_url = 0
+    skip_maxfail = 0
+    skip_flagged = 0
 
-        logger.info(f"找到 {len(hot_items)} 条需要分析的热点数据")
+    try:
+        # 只拉一小批，避免一次性处理太多
+        hot_items: List[DailyHot] = (
+            session.query(DailyHot)
+            .filter(
+                DailyHot.last_summarized_at.is_(None),
+                DailyHot.url.isnot(None),
+                DailyHot.url != "",
+            )
+            .order_by(DailyHot.collected_at.desc())
+            .limit(batch_size)
+            .all()
+        )
+
+        logger.info(f"找到 {len(hot_items)} 条需要分析的热点数据（本批上限 {batch_size}）")
 
         for item in hot_items:
             try:
-                # 检查失败次数，如果失败超过2次则跳过
-                if item.extra and isinstance(item.extra, dict):
-                    fail_count = item.extra.get('analysis_fail_count', 0)
-                    if fail_count >= 2:
-                        logger.info(f"跳过分析（失败次数已达上限）: {item.category} - {item.title}")
-                        continue
+                # extra 规范化
+                if item.extra is None or not isinstance(item.extra, dict):
+                    item.extra = {}
 
-                # 检查是否有URL可以用于分析
+                # 跳过“明确标记不分析”的
+                if item.extra.get("skip") is True:
+                    skip_flagged += 1
+                    continue
+
+                # 跳过无 URL 的（双保险，理论上上面的 filter 已经排除了）
                 if not item.url:
-                    logger.warning(f"跳过分析，没有URL: {item.category} - {item.title}")
-                    # 记录失败次数
-                    if not item.extra:
-                        item.extra = {}
-                    item.extra['analysis_fail_count'] = item.extra.get('analysis_fail_count', 0) + 1
-                    item.last_summarized_at = datetime.now()
+                    skip_no_url += 1
+                    # 记一次失败，防止反复进入队列
+                    item.extra["analysis_fail_count"] = item.extra.get("analysis_fail_count", 0) + 1
+                    item.extra["last_error"] = "missing_url"
                     session.commit()
                     continue
 
-                # 调用客户端的分析功能
-                analysis_result = client.analyze_hot_item(item.url)
+                # 失败次数上限
+                if item.extra.get("analysis_fail_count", 0) >= max_fail:
+                    skip_maxfail += 1
+                    continue
 
-                if analysis_result:
-                    # 更新数据库记录
-                    item.ai_summary = analysis_result["summary"]
-                    item.ai_tags = analysis_result["tags"]
+                # 调用外部分析器
+                result = client.analyze_hot_item(item.url)
+                if result and isinstance(result, dict) and "summary" in result and "tags" in result:
+                    item.ai_summary = result["summary"]
+                    item.ai_tags = result["tags"]
                     item.last_summarized_at = datetime.now()
-                    # 重置失败计数或清除错误信息
-                    if item.extra and isinstance(item.extra, dict):
-                        # 如果之前有失败记录，现在成功了则清除相关错误信息
-                        item.extra.pop('analysis_fail_count', None)
-                        item.extra.pop('last_error', None)
-                        # 如果extra字段变为空，则设为None
-                        if not item.extra:
-                            item.extra = None
+
+                    # 清理失败痕迹
+                    item.extra.pop("analysis_fail_count", None)
+                    item.extra.pop("last_error", None)
+                    if not item.extra:
+                        item.extra = None
 
                     session.commit()
+                    success_cnt += 1
                     logger.info(f"分析完成: {item.category} - {item.title}")
                 else:
-                    logger.error(f"分析失败: {item.category} - {item.title}")
-                    # 记录失败次数
-                    if not item.extra:
-                        item.extra = {}
-                    item.extra['analysis_fail_count'] = item.extra.get('analysis_fail_count', 0) + 1
-                    item.last_summarized_at = datetime.now()
+                    # 失败分支：只累计失败，不写 last_summarized_at
+                    item.extra["analysis_fail_count"] = item.extra.get("analysis_fail_count", 0) + 1
+                    item.extra["last_error"] = "empty_result"
                     session.commit()
-                    continue
+                    fail_cnt += 1
+                    logger.error(f"分析失败（空结果）: {item.category} - {item.title}")
 
             except Exception as e:
-                logger.error(f"分析失败: {item.category} - {item.title}, 错误: {e}")
-                # 记录失败次数
-                if not item.extra:
-                    item.extra = {}
-                item.extra['analysis_fail_count'] = item.extra.get('analysis_fail_count', 0) + 1
-                item.extra['last_error'] = str(e)
-                item.last_summarized_at = datetime.now()
-                session.commit()
-                continue
+                # 异常同样视为失败；不写 last_summarized_at
+                try:
+                    if item.extra is None or not isinstance(item.extra, dict):
+                        item.extra = {}
+                    item.extra["analysis_fail_count"] = item.extra.get("analysis_fail_count", 0) + 1
+                    item.extra["last_error"] = str(e)
+                    session.commit()
+                except Exception:
+                    session.rollback()
+                fail_cnt += 1
+                logger.exception(f"分析失败（异常）: {item.category} - {item.title} | 错误: {e}")
 
     except Exception as e:
-        logger.error(f"分析热点数据时出错: {e}")
+        logger.exception(f"分析阶段顶层异常：{e}")
     finally:
         session.close()
+
+    logger.info(
+        "本批分析汇总："
+        f"成功 {success_cnt} | 失败 {fail_cnt} | 跳过(无URL) {skip_no_url} | "
+        f"跳过(失败达上限≥{max_fail}) {skip_maxfail} | 跳过(标记skip) {skip_flagged}"
+    )
 
 
 def main():
