@@ -8,6 +8,7 @@ services:
     # 若是纯定时任务服务，不需要暴露端口；有 HTTP 健康检查时再加 ports
     environment:
       TZ: "Asia/Shanghai"
+      PYTHONUNBUFFERED: "1"
 
       # 模式开关
       RUN_AS_SCHEDULER: "true"     # 以调度器模式运行
