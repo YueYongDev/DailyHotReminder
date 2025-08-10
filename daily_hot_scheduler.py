@@ -53,7 +53,7 @@ def start_scheduler():
     # 添加数据收集任务，每天上午8点执行
     scheduler.add_job(
         collect_job,
-        CronTrigger(hour=8, minute=0),
+        CronTrigger(hour=0, minute=0),
         id='daily_hot_collector',
         name='每日热点收集',
         timezone='Asia/Shanghai'  # 使用中国时区
@@ -62,7 +62,7 @@ def start_scheduler():
     # 添加数据分析任务，每天上午9点执行
     scheduler.add_job(
         analyze_job,
-        CronTrigger(hour=9, minute=0),
+        CronTrigger(hour=0, minute=5),
         id='daily_hot_analyzer',
         name='每日热点分析',
         timezone='Asia/Shanghai'  # 使用中国时区
@@ -71,7 +71,7 @@ def start_scheduler():
     # 添加邮件发送任务，每天上午10点执行
     scheduler.add_job(
         email_job,
-        CronTrigger(hour=10, minute=0),
+        CronTrigger(hour=9, minute=0),
         id='daily_hot_reminder',
         name='每日热点提醒',
         timezone='Asia/Shanghai'  # 使用中国时区
