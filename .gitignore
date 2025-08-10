@@ -1,0 +1,11 @@
+/.env.example
+/.env
+/.idea
+/.vscode
+/node_modules
+/dist
+/.nuxt
+/.nuxtignore
+/.nuxtg
+/.venv
+/.gitignore
