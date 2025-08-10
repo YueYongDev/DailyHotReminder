@@ -2,6 +2,7 @@
 import os
 import signal
 from datetime import datetime
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -31,6 +32,32 @@ logger.add(
 )
 
 TZ = ZoneInfo("Asia/Shanghai")
+
+
+def get_next_time(job) -> Optional[datetime]:
+    # v3: next_run_time；v4: next_fire_time
+    nrt = getattr(job, "next_run_time", None) or getattr(job, "next_fire_time", None)
+    if nrt:
+        # 某些实现返回 naive datetime，补时区
+        if nrt.tzinfo is None:
+            nrt = nrt.replace(tzinfo=TZ)
+        return nrt.astimezone(TZ)
+
+    # 兜底：从 trigger 计算
+    now = datetime.now(TZ)
+    try:
+        # v3 签名: (previous_fire_time, now)
+        nft = job.trigger.get_next_fire_time(None, now)
+    except TypeError:
+        # v4 签名: (previous_fire_time, now) 也可能可用；某些实现叫 next
+        try:
+            nft = job.trigger.get_next_fire_time(previous_fire_time=None, now=now)
+        except Exception:
+            nft = None
+
+    if nft and nft.tzinfo is None:
+        nft = nft.replace(tzinfo=TZ)
+    return nft.astimezone(TZ) if nft else None
 
 
 def collect_job():
@@ -95,8 +122,9 @@ def start_scheduler():
 
     logger.info("定时任务已启动：")
     for job in scheduler.get_jobs():
-        nrt = job.next_run_time.astimezone(TZ) if job.next_run_time else None
-        logger.info(f"  - {job.name} | 下次运行：{nrt:%Y-%m-%d %H:%M:%S %Z}")
+        nrt = get_next_time(job)
+        logger.info(
+            f"  - {job.name} | 下次运行：{nrt:%Y-%m-%d %H:%M:%S %Z}" if nrt else f"  - {job.name} | 下次运行：未知")
 
     # 优雅退出
     def _graceful_shutdown(signum, frame):
