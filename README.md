@@ -53,8 +53,7 @@ cp .env.example .env
 2. 构建并启动容器：
 ```
 bash
-docker build -t daily-hot-reminder:local .
-docker-compose up -d
+docker compose up -d --build
 ```
 ## 使用说明
 

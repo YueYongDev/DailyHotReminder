@@ -1,4 +1,13 @@
 {
-  "yueyong1030@outlook.com": ["36kr", "tieba", "zhihu"],
-  "yueyong.lyy@icloud.com": ["zhihu", "weibo"]
+  "yueyong1030@outlook.com": [
+    "36kr",
+    "weibo",
+    "bilibili",
+    "douyin"
+  ],
+  "yueyong.lyy@icloud.com": [
+    "toutiao",
+    "ngabbs",
+    "netease-news"
+  ]
 }
