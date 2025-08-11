@@ -1,3 +1,4 @@
+from time import sleep
 from typing import Dict, Any
 
 
@@ -199,8 +200,12 @@ def analyze_daily_hot_data(batch_size: int = 100, max_fail: int = 2) -> None:
                         skip_maxfail += 1
                         continue
 
+                    logger.info(f"分析中: {item.category} - {item.title}")
                     # 调用外部分析器
                     result = client.analyze_hot_item(item.url)
+                    logger.debug(f"分析结果: {result}", extra={"item_id": item.id})
+                    logger.debug(f"等待1秒...")
+                    sleep(1)
                     if result and isinstance(result, dict) and "summary" in result and "tags" in result:
                         item.ai_summary = result["summary"]
                         item.ai_tags = result["tags"]
@@ -238,6 +243,8 @@ def analyze_daily_hot_data(batch_size: int = 100, max_fail: int = 2) -> None:
                     
             total_processed += len(hot_items)
             logger.info(f"第 {current_batch} 批处理完成，已处理 {total_processed}/{total_count} 条数据")
+            logger.debug(f"等待5秒...")
+            sleep(5)
 
     except Exception as e:
         logger.exception(f"分析阶段顶层异常：{e}")

@@ -109,7 +109,7 @@ class DailyHotClient:
             payload = {"url": url}
             headers = {"Content-Type": "application/json"}
 
-            response = requests.post(api_url, json=payload, headers=headers, timeout=20)
+            response = requests.post(api_url, json=payload, headers=headers, timeout=60)
             response.raise_for_status()
 
             # 解析API响应
