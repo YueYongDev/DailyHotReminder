@@ -108,7 +108,7 @@ from models import DailyHot
 
 def analyze_daily_hot_data(batch_size: int = 100, max_fail: int = 2) -> None:
     """
-    拉取“待分析”的热点数据，调用外部摘要器生成 {summary, tags}，并写回数据库。
+    拉取"待分析"的热点数据，调用外部摘要器生成 {summary, tags}，并写回数据库。
 
     规则：
     - 仅处理 last_summarized_at 为 NULL 且 url 非空的记录
@@ -125,84 +125,119 @@ def analyze_daily_hot_data(batch_size: int = 100, max_fail: int = 2) -> None:
     skip_no_url = 0
     skip_maxfail = 0
     skip_flagged = 0
-
+    total_processed = 0
+    
     try:
-        # 只拉一小批，避免一次性处理太多
-        hot_items: List[DailyHot] = (
+        # 先获取待处理数据的总数
+        total_count = (
             session.query(DailyHot)
             .filter(
                 DailyHot.last_summarized_at.is_(None),
                 DailyHot.url.isnot(None),
                 DailyHot.url != "",
             )
-            .order_by(DailyHot.collected_at.desc())
-            .limit(batch_size)
-            .all()
+            .count()
         )
+        
+        if total_count == 0:
+            logger.info("没有需要分析的热点数据")
+            return
+            
+        logger.info(f"总共找到 {total_count} 条需要分析的热点数据")
+        
+        # 计算总批次数
+        total_batches = (total_count + batch_size - 1) // batch_size
+        current_batch = 0
+        
+        # 分批处理所有数据
+        for offset in range(0, total_count, batch_size):
+            current_batch += 1
+            logger.info(f"开始处理第 {current_batch}/{total_batches} 批数据")
+            
+            # 获取当前批次的数据
+            hot_items: List[DailyHot] = (
+                session.query(DailyHot)
+                .filter(
+                    DailyHot.last_summarized_at.is_(None),
+                    DailyHot.url.isnot(None),
+                    DailyHot.url != "",
+                )
+                .order_by(DailyHot.collected_at.desc())
+                .offset(offset)
+                .limit(batch_size)
+                .all()
+            )
 
-        logger.info(f"找到 {len(hot_items)} 条需要分析的热点数据（本批上限 {batch_size}）")
+            # 如果没有更多数据需要处理，则退出循环
+            if not hot_items:
+                break
 
-        for item in hot_items:
-            try:
-                # extra 规范化
-                if item.extra is None or not isinstance(item.extra, dict):
-                    item.extra = {}
+            logger.info(f"第 {current_batch} 批: 找到 {len(hot_items)} 条需要分析的热点数据")
 
-                # 跳过“明确标记不分析”的
-                if item.extra.get("skip") is True:
-                    skip_flagged += 1
-                    continue
-
-                # 跳过无 URL 的（双保险，理论上上面的 filter 已经排除了）
-                if not item.url:
-                    skip_no_url += 1
-                    # 记一次失败，防止反复进入队列
-                    item.extra["analysis_fail_count"] = item.extra.get("analysis_fail_count", 0) + 1
-                    item.extra["last_error"] = "missing_url"
-                    session.commit()
-                    continue
-
-                # 失败次数上限
-                if item.extra.get("analysis_fail_count", 0) >= max_fail:
-                    skip_maxfail += 1
-                    continue
-
-                # 调用外部分析器
-                result = client.analyze_hot_item(item.url)
-                if result and isinstance(result, dict) and "summary" in result and "tags" in result:
-                    item.ai_summary = result["summary"]
-                    item.ai_tags = result["tags"]
-                    item.last_summarized_at = datetime.now()
-
-                    # 清理失败痕迹
-                    item.extra.pop("analysis_fail_count", None)
-                    item.extra.pop("last_error", None)
-                    if not item.extra:
-                        item.extra = None
-
-                    session.commit()
-                    success_cnt += 1
-                    logger.info(f"分析完成: {item.category} - {item.title}")
-                else:
-                    # 失败分支：只累计失败，不写 last_summarized_at
-                    item.extra["analysis_fail_count"] = item.extra.get("analysis_fail_count", 0) + 1
-                    item.extra["last_error"] = "empty_result"
-                    session.commit()
-                    fail_cnt += 1
-                    logger.error(f"分析失败（空结果）: {item.category} - {item.title}")
-
-            except Exception as e:
-                # 异常同样视为失败；不写 last_summarized_at
+            for item in hot_items:
                 try:
+                    # extra 规范化
                     if item.extra is None or not isinstance(item.extra, dict):
                         item.extra = {}
-                    item.extra["analysis_fail_count"] = item.extra.get("analysis_fail_count", 0) + 1
-                    item.extra["last_error"] = str(e)
-                    session.commit()
-                except Exception:
-                    session.rollback()
-                fail_cnt += 1
-                logger.exception(f"分析失败（异常）: {item.category} - {item.title} | 错误: {e}")
+
+                    # 跳过"明确标记不分析"的
+                    if item.extra.get("skip") is True:
+                        skip_flagged += 1
+                        continue
+
+                    # 跳过无 URL 的（双保险，理论上上面的 filter 已经排除了）
+                    if not item.url:
+                        skip_no_url += 1
+                        # 记一次失败，防止反复进入队列
+                        item.extra["analysis_fail_count"] = item.extra.get("analysis_fail_count", 0) + 1
+                        item.extra["last_error"] = "missing_url"
+                        session.commit()
+                        continue
+
+                    # 失败次数上限
+                    if item.extra.get("analysis_fail_count", 0) >= max_fail:
+                        skip_maxfail += 1
+                        continue
+
+                    # 调用外部分析器
+                    result = client.analyze_hot_item(item.url)
+                    if result and isinstance(result, dict) and "summary" in result and "tags" in result:
+                        item.ai_summary = result["summary"]
+                        item.ai_tags = result["tags"]
+                        item.last_summarized_at = datetime.now()
+
+                        # 清理失败痕迹
+                        item.extra.pop("analysis_fail_count", None)
+                        item.extra.pop("last_error", None)
+                        if not item.extra:
+                            item.extra = None
+
+                        session.commit()
+                        success_cnt += 1
+                        logger.info(f"分析完成: {item.category} - {item.title}")
+                    else:
+                        # 失败分支：只累计失败，不写 last_summarized_at
+                        item.extra["analysis_fail_count"] = item.extra.get("analysis_fail_count", 0) + 1
+                        item.extra["last_error"] = "empty_result"
+                        session.commit()
+                        fail_cnt += 1
+                        logger.error(f"分析失败（空结果）: {item.category} - {item.title}")
+
+                except Exception as e:
+                    # 异常同样视为失败；不写 last_summarized_at
+                    try:
+                        if item.extra is None or not isinstance(item.extra, dict):
+                            item.extra = {}
+                        item.extra["analysis_fail_count"] = item.extra.get("analysis_fail_count", 0) + 1
+                        item.extra["last_error"] = str(e)
+                        session.commit()
+                    except Exception:
+                        session.rollback()
+                    fail_cnt += 1
+                    logger.exception(f"分析失败（异常）: {item.category} - {item.title} | 错误: {e}")
+                    
+            total_processed += len(hot_items)
+            logger.info(f"第 {current_batch} 批处理完成，已处理 {total_processed}/{total_count} 条数据")
 
     except Exception as e:
         logger.exception(f"分析阶段顶层异常：{e}")
@@ -210,9 +245,10 @@ def analyze_daily_hot_data(batch_size: int = 100, max_fail: int = 2) -> None:
         session.close()
 
     logger.info(
-        "本批分析汇总："
+        "分析完成汇总："
         f"成功 {success_cnt} | 失败 {fail_cnt} | 跳过(无URL) {skip_no_url} | "
-        f"跳过(失败达上限≥{max_fail}) {skip_maxfail} | 跳过(标记skip) {skip_flagged}"
+        f"跳过(失败达上限≥{max_fail}) {skip_maxfail} | 跳过(标记skip) {skip_flagged} | "
+        f"总计处理 {total_processed}"
     )
 
 
