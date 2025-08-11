@@ -100,21 +100,21 @@ def start_scheduler():
     # === 根据你的注释：8:00 / 8:05 / 9:00 ===
     scheduler.add_job(
         collect_job,
-        CronTrigger(hour=8, minute=0),
+        CronTrigger(hour=1, minute=0),
         id="daily_hot_collector",
         name="每日热点收集",
         replace_existing=True,
     )
     scheduler.add_job(
         analyze_job,
-        CronTrigger(hour=8, minute=5),
+        CronTrigger(hour=1, minute=5),
         id="daily_hot_analyzer",
         name="每日热点分析",
         replace_existing=True,
     )
     scheduler.add_job(
         email_job,
-        CronTrigger(hour=9, minute=0),
+        CronTrigger(hour=10, minute=0),
         id="daily_hot_reminder",
         name="每日热点提醒",
         replace_existing=True,
