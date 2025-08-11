@@ -27,10 +27,6 @@ services:
       SENDER_EMAIL: "${SENDER_EMAIL}"
       SENDER_PASSWORD: "${SENDER_PASSWORD}"
 
-      # 收件人：不要在环境变量名里用 @ ，改成统一的 CSV 或 YAML
-      # 示例（CSV）：邮箱:频道列表;邮箱:频道列表
-      RECIPIENTS: "yueyong1030@outlook.com:36kr,tieba,zhihu"
-
 
     # Linux 想访问宿主机（DB/其它服务）必须加这行
     extra_hosts:
